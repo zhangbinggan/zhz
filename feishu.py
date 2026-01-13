@@ -1,67 +1,60 @@
-import time
-import hmac
-import hashlib
-import base64
-import requests
-import json
-import os
+import smtplib
 import logging
+import os
+from email.mime.text import MIMEText
+from email.header import Header
 
 
-def feishu(title: str, content: str) -> dict:
+# 推送到邮箱
+def feishu(DD_BOT_TOKEN, DD_BOT_SECRET, text, desp):
     """
-    发送飞书机器人消息
+    发送邮箱通知
 
     Args:
-        feishu_webhook: 飞书机器人的webhook地址
-        feishu_secret: 安全设置中的签名校验密钥
-        title: 消息标题
-        content: 消息内容
+        DD_BOT_TOKEN: 钉钉令牌（未使用，保持与钉钉函数签名一致）
+        DD_BOT_SECRET: 钉钉密钥（未使用，保持与钉钉函数签名一致）
+        text: 消息标题
+        desp: 消息内容
 
     Returns:
-        dict: 接口返回结果
+        dict: 发送结果
     """
-    # 环境变量
-    FEISHU_BOT_URL = os.environ.get("FEISHU_BOT_URL")
-    FEISHU_BOT_SECRET = os.environ.get("FEISHU_BOT_SECRET")
-
-    feishu_webhook = FEISHU_BOT_URL
-    feishu_secret = FEISHU_BOT_SECRET
-    timestamp = str(int(time.time()))
-
-    # 计算签名
-    string_to_sign = f"{timestamp}\n{feishu_secret}"
-    hmac_code = hmac.new(
-        string_to_sign.encode("utf-8"), digestmod=hashlib.sha256
-    ).digest()
-    sign = base64.b64encode(hmac_code).decode("utf-8")
-
-    # 构建请求头
-    headers = {"Content-Type": "application/json"}
-
-    # 构建消息内容
-    msg = {
-        "timestamp": timestamp,
-        "sign": sign,
-        "msg_type": "post",
-        "content": {
-            "post": {
-                "zh_cn": {
-                    "title": title,
-                    "content": [[{"tag": "text", "text": content}]],
-                }
-            }
-        },
-    }
-
-    # 发送请求
+    # 配置信息
+    sender_email = "166767710@qq.com"
+    receiver_email = os.environ.get("FEISHU_BOT_SECRET")
+    smtp_server = "smtp.qq.com"
+    smtp_port = 465  # 使用SSL加密端口
+    password = "teekuuhqnbrncbag"  # QQ邮箱授权码
+    
+    # 检查收件人邮箱是否配置
+    if not receiver_email:
+        logging.error("收件人邮箱未配置，请在环境变量中设置FEISHU_BOT_SECRET")
+        return {"success": False, "message": "收件人邮箱未配置"}
+    
+    # 创建邮件内容，格式与钉钉相同：text\ndesp
+    email_content = f"{text}\n{desp}"
+    message = MIMEText(email_content, 'plain', 'utf-8')
+    message['From'] = Header(sender_email)
+    message['To'] = Header(receiver_email)
+    message['Subject'] = Header(text, 'utf-8')  # 使用text作为邮件主题
+    
     try:
-        if not isinstance(feishu_webhook, str):
-            logging.error(f"飞书webhook未配置")
-            return {"error": "飞书webhook未配置"}
-        response = requests.post(feishu_webhook, headers=headers, data=json.dumps(msg))
-        logging.info(f"飞书发送通知消息成功🎉\n{response.json()}")
-        return response.json()
+        # 连接SMTP服务器
+        server = smtplib.SMTP_SSL(smtp_server, smtp_port)
+        logging.info(f"成功连接到SMTP服务器: {smtp_server}:{smtp_port}")
+        
+        # 登录邮箱
+        server.login(sender_email, password)
+        logging.info(f"邮箱登录成功: {sender_email}")
+        
+        # 发送邮件
+        server.sendmail(sender_email, receiver_email, message.as_string())
+        logging.info(f"邮件发送成功🎉\n收件人: {receiver_email}\n主题: {text}")
+        
+        # 关闭连接
+        server.quit()
+        return {"success": True, "message": "邮件发送成功"}
+        
     except Exception as e:
-        logging.error(f"飞书发送通知消息失败😞\n{e}")
-        return {"error": str(e)}
+        logging.error(f"邮件发送失败😞\n收件人: {receiver_email}\n主题: {text}\n错误信息: {str(e)}")
+        return {"success": False, "message": f"邮件发送失败: {str(e)}"}
