@@ -21,6 +21,9 @@ DD_BOT_SECRET = os.getenv("DD_BOT_SECRET")
 FEISHU_BOT_URL = os.getenv("FEISHU_BOT_URL")
 FEISHU_BOT_SECRET = os.getenv("FEISHU_BOT_SECRET")
 
+# 学期配置
+SEMESTER = os.getenv("SEMESTER", "2024-2025-2")  # 默认值为当前学期
+
 # 设置日志配置
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -126,8 +129,12 @@ def get_user_credentials():
     """
     user_account = os.getenv("USER_ACCOUNT")
     user_password = os.getenv("USER_PASSWORD")
-    logging.info(f"用户名: {user_account}")
-    logging.info(f"密码: {user_password}")
+    if user_account and user_password:
+        logging.info(f"用户名: {user_account[:2]}{'*' * (len(user_account)-2)}")
+        logging.info(f"密码: {'*' * len(user_password)}")
+    else:
+        logging.error("请在.env文件中设置USER_ACCOUNT和USER_PASSWORD环境变量")
+        return None, None
     return user_account, user_password
 
 
@@ -225,6 +232,30 @@ def save_scores_to_file(scores, filename="scores.json"):
         json.dump(scores, f, ensure_ascii=False, indent=4)
 
 
+def safe_file_write(filename, content, mode="w", encoding="utf-8"):
+    """
+    安全地写入文件，如果目录不存在则创建
+    参数:
+        filename: 文件名
+        content: 要写入的内容
+        mode: 写入模式
+        encoding: 文件编码
+    """
+    try:
+        # 确保目录存在
+        os.makedirs(
+            os.path.dirname(filename) if os.path.dirname(filename) else ".",
+            exist_ok=True,
+        )
+
+        with open(filename, mode, encoding=encoding) as f:
+            f.write(content)
+        return True
+    except Exception as e:
+        logging.error(f"写入文件 {filename} 失败: {e}")
+        return False
+
+
 def load_scores_from_file(filename="scores.json"):
     """
     从本地文件加载成绩
@@ -232,18 +263,27 @@ def load_scores_from_file(filename="scores.json"):
         filename: 文件名
     返回: 成绩列表
     """
-    if os.path.exists(filename):
-        with open(filename, "r", encoding="utf-8") as f:
-            data = f.read()
-            if data.strip():  # 检查文件是否有数据
-                return json.loads(data)
-            else:
-                logging.info(f"文件 {filename} 为空，初始化为空列表")
-                return []
-    else:
-        logging.error(f"文件 {filename} 不存在，新建空文件")
-        with open(filename, "w", encoding="utf-8") as f:
-            f.write("[]")
+    try:
+        if os.path.exists(filename):
+            with open(filename, "r", encoding="utf-8") as f:
+                data = f.read()
+                if data.strip():  # 检查文件是否有数据
+                    return json.loads(data)
+                else:
+                    logging.info(f"文件 {filename} 为空，初始化为空列表")
+                    return []
+        else:
+            logging.info(f"文件 {filename} 不存在，创建新文件")
+            # 确保目录存在
+            os.makedirs(
+                os.path.dirname(filename) if os.path.dirname(filename) else ".",
+                exist_ok=True,
+            )
+            with open(filename, "w", encoding="utf-8") as f:
+                f.write("[]")
+            return []
+    except Exception as e:
+        logging.error(f"读取文件 {filename} 失败: {e}")
         return []
 
 
@@ -279,7 +319,7 @@ def parse_credits_and_gpa(session, cookies):
         html_content: HTML页面内容
     返回: [(学分, 绩点), ...] 的列表
     """
-    url = "http://zhjw.qfnu.edu.cn/jsxsd/kscj/cjcx_list?kksj=2024-2025-1&kcxz=&kcmc=&xsfs=all"
+    url = f"http://zhjw.qfnu.edu.cn/jsxsd/kscj/cjcx_list?kksj={SEMESTER}&kcxz=&kcmc=&xsfs=all"
     response = session.get(url, cookies=cookies)
     soup = BeautifulSoup(response.text, "lxml")
     results = []
@@ -331,11 +371,11 @@ def validate_credentials(user_account, user_password):
     logging.info("获取环境变量")
     if not user_account or not user_password:
         logging.error(
-            "请在.env文件中设置USER_ACCOUNT、USER_PASSWORD、DD_BOT_TOKEN、DD_BOT_SECRET、FEISHU_BOT_URL、FEISHU_BOT_SECRET环境变量"
+            "请在.env文件中设置USER_ACCOUNT、USER_PASSWORD、DD_BOT_TOKEN、DD_BOT_SECRET、FEISHU_BOT_URL、FEISHU_BOT_SECRET、SEMESTER环境变量"
         )
         with open(".env", "w", encoding="utf-8") as f:
             f.write(
-                "USER_ACCOUNT=\nUSER_PASSWORD=\nDD_BOT_TOKEN=\nDD_BOT_SECRET=\nFEISHU_BOT_URL=\nFEISHU_BOT_SECRET="
+                "USER_ACCOUNT=\nUSER_PASSWORD=\nDD_BOT_TOKEN=\nDD_BOT_SECRET=\nFEISHU_BOT_URL=\nFEISHU_BOT_SECRET=\nSEMESTER=2024-2025-2"
             )
         return False
     logging.info("获取环境变量成功")
@@ -354,10 +394,12 @@ def notify_connection_issue(user_account):
             "成绩监控通知",
             f"学号: {user_account}\n无法建立会话，请检查网络连接或教务系统的可用性。",
         )
-    if FEISHU_BOT_URL and FEISHU_BOT_SECRET:
+    if FEISHU_BOT_SECRET:
         feishu(
-            title="成绩监控通知",
-            content=f"学号: {user_account}\n无法建立会话，请检查网络连接或教务系统的可用性。",
+            DD_BOT_TOKEN,
+            DD_BOT_SECRET,
+            "成绩监控通知",
+            f"学号: {user_account}\n无法建立会话，请检查网络连接或教务系统的可用性。",
         )
 
 
@@ -405,7 +447,7 @@ def update_scores(score_list_converted, last_score_list, user_account):
 
 def notify_new_scores(message, user_account):
     """
-    通过钉钉和飞书通知新成绩
+    通过钉钉和邮箱通知新成绩
     """
     if DD_BOT_TOKEN and DD_BOT_SECRET:
         dingtalk(
@@ -414,10 +456,12 @@ def notify_new_scores(message, user_account):
             "成绩监控通知",
             f"学号: {user_account}\n{message}",
         )
-    if FEISHU_BOT_URL and FEISHU_BOT_SECRET:
+    if FEISHU_BOT_SECRET:
         feishu(
-            title="成绩监控通知",
-            content=f"学号: {user_account}\n{message}",
+            DD_BOT_TOKEN,
+            DD_BOT_SECRET,
+            "成绩监控通知",
+            f"学号: {user_account}\n{message}",
         )
 
 
@@ -433,10 +477,12 @@ def handle_exception(e, user_account):
             "成绩监控通知",
             f"学号: {user_account}\n发生错误: {e}",
         )
-    if FEISHU_BOT_URL and FEISHU_BOT_SECRET:
+    if FEISHU_BOT_SECRET:
         feishu(
-            title="成绩监控通知",
-            content=f"学号: {user_account}\n发生错误: {e}",
+            DD_BOT_TOKEN,
+            DD_BOT_SECRET,
+            "成绩监控通知",
+            f"学号: {user_account}\n发生错误: {e}",
         )
 
 
@@ -461,16 +507,25 @@ def main():
         # 获取全部学期的总学分和平均绩点
         total_credits, average_gpa = get_all_semester_scores(session, cookies)
         logging.info(f"总学分: {total_credits}, 平均绩点: {average_gpa}")
-        with open("output.txt", "w", encoding="utf-8") as f:
-            f.write(f"总学分: {total_credits}, 平均绩点: {average_gpa}\n")
-        logging.info("总学分和平均绩点数据保存成功")
+
+        # 使用安全的文件写入方法
+        if not safe_file_write(
+            "output.txt", f"总学分: {total_credits}, 平均绩点: {average_gpa}\n"
+        ):
+            logging.error("保存总学分和平均绩点数据失败")
+        else:
+            logging.info("总学分和平均绩点数据保存成功")
 
         # 计算本学期绩点
         credits_and_points = parse_credits_and_gpa(session, cookies)
-        average_gpa = calculate_average_gpa(credits_and_points)
-        logging.info(f"平均绩点: {average_gpa}")
-        with open("output.txt", "a", encoding="utf-8") as f:
-            f.write(f"2024-2025-1平均绩点: {average_gpa}")
+        semester_average_gpa = calculate_average_gpa(credits_and_points)
+        logging.info(f"{SEMESTER}平均绩点: {semester_average_gpa}")
+
+        # 追加写入本学期绩点
+        if not safe_file_write(
+            "output.txt", f"{SEMESTER}平均绩点: {semester_average_gpa}\n", mode="a"
+        ):
+            logging.error(f"保存{SEMESTER}平均绩点数据失败")
 
     except Exception as e:
         handle_exception(e, user_account)
