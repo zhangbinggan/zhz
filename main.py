@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 import json
 from dingtalk import dingtalk
 from feishu import feishu
+from email_score_query import process_score_queries
 import logging
 import re
 
@@ -544,6 +545,9 @@ def main():
             "output.txt", f"{SEMESTER}平均绩点: {semester_average_gpa}\n", mode="a"
         ):
             logging.error(f"保存{SEMESTER}平均绩点数据失败")
+
+        # 检查邮箱中的成绩查询请求
+        process_score_queries()
 
     except Exception as e:
         handle_exception(e, user_account)
